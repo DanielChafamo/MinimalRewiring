@@ -51,12 +51,12 @@ class MinimalRewiringILP(object):
     old_wiring[:self.current_wiring.shape[0],:self.current_wiring.shape[1]] = self.current_wiring
     
     # identify link movements
-    link_moves = self.link_moves(old_wiring, new_wiring)
+    lm = self.link_moves(old_wiring.astype(np.int), new_wiring.astype(np.int))
 
     # update wiring 
-    self.current_wiring = new_wiring
+    self.current_wiring = new_wiring.astype(np.int)
 
-    return link_moves
+    return lm
 
   def prepare_variables(self): 
     self.variables = cp.Variable(self.nsp*self.nsv*2, integer=True)
@@ -119,7 +119,7 @@ class MinimalRewiringILP(object):
         self.objective += self.variables[i]
 
   def link_moves(self, current_wiring, final_wiring):
-    capacity = self.switch_set.server_numports
+    capacity = self.switch_set.spine_numports
     changes = self.ConnectDisconnect(current_wiring, final_wiring)
     rewires = []
     while len(changes) > 0:
@@ -130,11 +130,14 @@ class MinimalRewiringILP(object):
     return rewires
 
   def ConnectDisconnect(self, initial, final):
-    disconnect = connect = log = []
+    disconnect = []
+    connect = []
+    log = []
     for i in range(len(initial)):
         for j in range(len(initial[0])): 
             to_change = final[i][j] - initial[i][j]
             if to_change < 0:  
+                # check if there's a match if not store away
                 for k in range(len(connect)): 
                     if connect[k][0] == i:
                         while connect[k][2] and abs(to_change):
