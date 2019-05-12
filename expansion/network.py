@@ -173,11 +173,21 @@ class Network(object):
           opt_ports += self.switches[c_id].links[a_id]
         self.flow_rules[c_id][h_id] = np.random.choice(opt_ports) 
 
+  def core_agg_wiring(self):
+    """ Generate wiring matrix between core and agg levels """
+    core_key = {sid:i for i, sid in enumerate(self.get_type('core'))}
+    agg_key = {sid:i for i, sid in enumerate(self.get_type('agg'))}
+    wiring = np.zeros((len(core_key), len(agg_key)))
+    for c_id in core_key.keys():
+      for a_id in self.switches[c_id].links.keys():
+        wiring[core_key[c_id],agg_key[a_id]] = len(self.switches[c_id].links[aid])
+    return wiring, core_key.update(agg_key)
+
   def write_graph(self):
     """ Write json graph for visualization purposes """
     G = self.to_nx()
     g = nx.readwrite.json_graph.node_link_data(G)
-    with open('CloudNetVis/netvis/static/netvis/traffic/traffic.json', 'w') as fp:
+    with open('../CloudNetVis/netvis/static/netvis/traffic/traffic.json', 'w') as fp:
       json.dump(g, fp, indent=4)
 
 
