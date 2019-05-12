@@ -25,15 +25,19 @@ class Switch(object):
 
 
 class Network(object):
+  """ Network state class
+  """
   def __init__(self):
     self.edges = defaultdict(int)         # edges[(nid1, nid2)] = num_links
     self.switches = {}                    # nodes[nid] = {'type', 'nports', 'num'}
-    self.flow_rules = defaultdict(dict)   # flow_rules[id] = {dst : port_num}
+    self.routes = defaultdict(dict)       # routes[id] = {dst : port_num}
+    self.max_sid = 0                      # largest switch id in network
 
     self.counts = {'host':0, 'edge':0, 'agg':0, 'core':0}
 
-  def add_switch(self, nid, nports, stype):
-    self.switches[nid] = Switch(nid, nports, stype, self.counts[stype])
+  def add_switch(self, sid, nports, stype):
+    self.max_sid = max(self.max_sid, sid)
+    self.switches[nid] = Switch(sid, nports, stype, self.counts[stype])
     self.counts[stype] += 1
 
   def add_link(self, nid1, nid2, count):
@@ -83,6 +87,68 @@ class Network(object):
 
     self.edges[(nid1, nid2)] -= count
 
+  def route_ecmp(self):
+    """ Compute ECMP routing paths for each switch in the network """
+    # routing for edges
+    for e_id in self.get_type('edge'):
+      # uplink ports to distribute over
+      n_uplinks = self.switches[e_id].uplinks
+      nports = self.switches[e_id].nports 
+      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
+      count = 0
+
+      for h_id in self.get_type('host'):
+        if self.linked(e_id, h_id):
+          self.routes[e_id][h_id] = self.switches[e_id].links[h_id][0]
+        else:
+          self.routes[e_id][h_id] = up_ports[count % n_uplinks]
+          count += 1
+
+    # routing for aggs
+    for a_id in self.get_type('agg'):
+      # hosts within agg switches' pod 
+      hosts = {} 
+      for e_id in self.switches[a_id].links.keys():
+        if self.switches[e_id].stype == 'edge':
+          for h_id in self.switches[e_id].links.keys():
+            if self.switches[h_id].stype == 'host':
+              hosts[h_id] = e_id
+
+      # uplink ports to distribute over
+      n_uplinks = self.switches[a_id].uplinks
+      nports = self.switches[a_id].nports 
+      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
+      count = 0
+
+      for h_id in self.get_type('host'):
+        if h_id in hosts.keys(): 
+          e_id = hosts[h_id]
+          self.routes[a_id][h_id] = self.switches[a_id].links[e_id][0]
+        else:
+          self.routes[a_id][h_id] = up_ports[count % n_uplinks]
+          count += 1
+
+    # routing for core
+    for c_id in self.get_type('core'):
+      # map host to list of agg switches that can lead to host
+      hosts = defaultdict(list)
+      for a_id in self.switches[c_id].links.keys():
+        for e_id in self.switches[a_id].links.keys():
+          if self.switches[e_id].stype == 'edge':
+            for h_id in self.switches[e_id].links.keys():
+              if self.switches[h_id].stype == 'host':
+                hosts[h_id].append(a_id) 
+
+      # randomly choose one of the mapped agg switches
+      for h_id in self.get_type('host'): 
+        a_ids = hosts[h_id]
+        opt_ports = []
+        for a_id in a_ids:
+          opt_ports += self.switches[c_id].links[a_id]
+        self.routes[c_id][h_id] = np.random.choice(opt_ports) 
+
+    return self.routes
+
 
   def is_up(self, nid1, nid2):
     level = {'host':1, 'edge':2, 'agg':3, 'core':4}
@@ -113,66 +179,6 @@ class Network(object):
   def graph_traffic_matrix(self, matrix):
     pass
 
-  def route_ecmp(self):
-
-    # edges
-    for e_id in self.get_type('edge'):
-      # uplink ports to distribute over
-      n_uplinks = self.switches[e_id].uplinks
-      nports = self.switches[e_id].nports 
-      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
-      count = 0
-
-      for h_id in self.get_type('host'):
-        if self.linked(e_id, h_id):
-          self.flow_rules[e_id][h_id] = self.switches[e_id].links[h_id][0]
-        else:
-          self.flow_rules[e_id][h_id] = up_ports[count % n_uplinks]
-          count += 1
-
-    # aggs
-    for a_id in self.get_type('agg'):
-      # hosts within agg switches' pod 
-      hosts = {} 
-      for e_id in self.switches[a_id].links.keys():
-        if self.switches[e_id].stype == 'edge':
-          for h_id in self.switches[e_id].links.keys():
-            if self.switches[h_id].stype == 'host':
-              hosts[h_id] = e_id
-
-      # uplink ports to distribute over
-      n_uplinks = self.switches[a_id].uplinks
-      nports = self.switches[a_id].nports 
-      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
-      count = 0
-
-      for h_id in self.get_type('host'):
-        if h_id in hosts.keys(): 
-          e_id = hosts[h_id]
-          self.flow_rules[a_id][h_id] = self.switches[a_id].links[e_id][0]
-        else:
-          self.flow_rules[a_id][h_id] = up_ports[count % n_uplinks]
-          count += 1
-
-    # core
-    for c_id in self.get_type('core'):
-      # map host to list of agg switches that can lead to host
-      hosts = defaultdict(list)
-      for a_id in self.switches[c_id].links.keys():
-        for e_id in self.switches[a_id].links.keys():
-          if self.switches[e_id].stype == 'edge':
-            for h_id in self.switches[e_id].links.keys():
-              if self.switches[h_id].stype == 'host':
-                hosts[h_id].append(a_id) 
-
-      # randomly choose one of the mapped agg switches
-      for h_id in self.get_type('host'): 
-        a_ids = hosts[h_id]
-        opt_ports = []
-        for a_id in a_ids:
-          opt_ports += self.switches[c_id].links[a_id]
-        self.flow_rules[c_id][h_id] = np.random.choice(opt_ports) 
-
   def core_agg_wiring(self):
     """ Generate wiring matrix between core and agg levels """
     core_key = {sid:i for i, sid in enumerate(self.get_type('core'))}
@@ -180,7 +186,7 @@ class Network(object):
     wiring = np.zeros((len(core_key), len(agg_key)))
     for c_id in core_key.keys():
       for a_id in self.switches[c_id].links.keys():
-        wiring[core_key[c_id],agg_key[a_id]] = len(self.switches[c_id].links[aid])
+        wiring[core_key[c_id],agg_key[a_id]] = len(self.switches[c_id].links[a_id])
     return wiring, core_key.update(agg_key)
 
   def write_graph(self):
