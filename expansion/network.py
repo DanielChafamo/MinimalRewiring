@@ -13,12 +13,22 @@ class Switch(object):
     self.uplinks = 0      # number of uplinks
     self.links = {}       # links: nid -> [port# ]
 
+  def __str__(self):
+    string = "Switch {}, of type '{}', with {} ports\n"\
+      .format(self.nid, self.stype, self.nports)
+    string += "Has {} links, with {} of them pointing up\n"\
+      .format(self.nlinks, self.uplinks)
+    lnks = ", ".join(["Switch {} at ports {}"\
+                     .format(nid, self.links[nid]) for nid in self.links.keys()])
+    string += "Linked to {}".format(lnks)
+    return string
+
 
 class Network(object):
   def __init__(self):
-    self.edges = defaultdict(int)   # edges[(nid1, nid2)] = num_links
-    self.switches = {}              # nodes[nid] = {'type', 'nports', 'num'}
-    self.flow_rules = {}            # flow_rules[id] = {dst : port_num}
+    self.edges = defaultdict(int)         # edges[(nid1, nid2)] = num_links
+    self.switches = {}                    # nodes[nid] = {'type', 'nports', 'num'}
+    self.flow_rules = defaultdict(dict)   # flow_rules[id] = {dst : port_num}
 
     self.counts = {'host':0, 'edge':0, 'agg':0, 'core':0}
 
@@ -32,7 +42,7 @@ class Network(object):
     if nid1 not in self.switches.keys() or nid2 not in self.switches.keys():
       raise KeyError('Trying to insert edge at unrecognized node.')
 
-    if self.switches[nid1].nlinks + count > self.switches[nid1].nports or 
+    if self.switches[nid1].nlinks + count > self.switches[nid1].nports or \
       self.switches[nid2].nlinks+ count > self.switches[nid2].nports:
       raise Exception('Not enough ports for edge.')
 
@@ -76,12 +86,12 @@ class Network(object):
 
   def is_up(self, nid1, nid2):
     level = {'host':1, 'edge':2, 'agg':3, 'core':4}
-    return level[self.switches[nid1].type] > level[self.switches[nid2].type]
+    return level[self.switches[nid1].stype] < level[self.switches[nid2].stype]
 
   def get_type(self, _type):
     switches = []
     for idx in self.switches.keys():
-      if self.switches[idx].type == _type:
+      if self.switches[idx].stype == _type:
         switches.append(idx)
     return switches
 
@@ -92,10 +102,12 @@ class Network(object):
     G = nx.Graph()
     G.add_nodes_from(self.switches.keys())
     for nid in G.nodes(): 
-      G.node[nid]['type'] = self.switches[nid]['type']
-      G.node[nid]['num'] = self.switches[nid]['num']
+      G.node[nid]['type'] = self.switches[nid].stype
+      G.node[nid]['num'] = self.switches[nid].num
 
     G.add_edges_from(self.edges.keys())
+    for edge in G.edges:
+      G.edges[edge]["count"] = self.edges[edge]
     return G
 
   def graph_traffic_matrix(self, matrix):
@@ -122,11 +134,11 @@ class Network(object):
     for a_id in self.get_type('agg'):
       # hosts within agg switches' pod
       edges = [sid for sid in self.switches[a_id].links.keys() 
-        if self.switches[a_id].type == 'edge']
+        if self.switches[a_id].stype == 'edge']
       hosts = {}
       for e_id in edges:
         for sid in self.switches[e_id].links.keys():
-          if self.switches[sid].type == 'host':
+          if self.switches[sid].stype == 'host':
             hosts[sid] = e_id
 
       # uplink ports to distribute over
@@ -149,9 +161,9 @@ class Network(object):
       hosts = defaultdict(list)
       for a_id in self.switches[c_id].links.keys():
         for e_id in self.switches[a_id].links.keys():
-          if self.switch[e_id].type == 'edge':
+          if self.switches[e_id].stype == 'edge':
             for h_id in self.switches[e_id].links.keys():
-              if self.switches[h_id].type == 'host':
+              if self.switches[h_id].stype == 'host':
                 hosts[h_id].append(a_id) 
 
       # randomly choose one of the mapped agg switches
@@ -168,7 +180,5 @@ class Network(object):
     g = nx.readwrite.json_graph.node_link_data(G)
     with open('CloudNetVis/netvis/static/netvis/traffic/traffic.json', 'w') as fp:
       json.dump(g, fp, indent=4)
-
-
 
 
