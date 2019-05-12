@@ -120,7 +120,7 @@ class Network(object):
       # uplink ports to distribute over
       n_uplinks = self.switches[e_id].uplinks
       nports = self.switches[e_id].nports 
-      up_ports = list(range(nports - n_uplinks, nports))
+      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
       count = 0
 
       for h_id in self.get_type('host'):
@@ -132,19 +132,18 @@ class Network(object):
 
     # aggs
     for a_id in self.get_type('agg'):
-      # hosts within agg switches' pod
-      edges = [sid for sid in self.switches[a_id].links.keys() 
-        if self.switches[a_id].stype == 'edge']
-      hosts = {}
-      for e_id in edges:
-        for sid in self.switches[e_id].links.keys():
-          if self.switches[sid].stype == 'host':
-            hosts[sid] = e_id
+      # hosts within agg switches' pod 
+      hosts = {} 
+      for e_id in self.switches[a_id].links.keys():
+        if self.switches[e_id].stype == 'edge':
+          for h_id in self.switches[e_id].links.keys():
+            if self.switches[h_id].stype == 'host':
+              hosts[h_id] = e_id
 
       # uplink ports to distribute over
       n_uplinks = self.switches[a_id].uplinks
       nports = self.switches[a_id].nports 
-      up_ports = list(range(nports - n_uplinks, nports))
+      up_ports = list(range(nports - n_uplinks + 1, nports + 1))
       count = 0
 
       for h_id in self.get_type('host'):
