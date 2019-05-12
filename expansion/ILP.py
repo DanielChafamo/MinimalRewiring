@@ -2,8 +2,11 @@ import numpy as np
 import cvxpy as cp
 
 
-# keep track of server and spine blocks and the number of ports in each
+
 class SwitchSet(object):
+  """ Class to keep track of server and spine blocks 
+
+  """
   def __init__(self, num_server=None, 
                      num_spine=None,
                      server_numports=None,
@@ -21,12 +24,29 @@ class SwitchSet(object):
 
 
 class MinimalRewiringILP(object):
+  """ Main class to do minimal rewiring using ILP 
+  Args:
+        initial_wiring (np.ndarray): initial number of links between every pair
+            of spine block and server block
+
+  """
   def __init__(self, initial_wiring):
     self.switch_set = SwitchSet()
     self.switch_set.from_wiring_matrix(initial_wiring)
     self.current_wiring = initial_wiring
 
   def rewire(self, level, num_ports):
+    """ Function to compute rewiring after adding a new block 
+    Args:
+          level (string): "spine" or "server"
+          num_ports (int): number of ports on switch
+
+    Returns:
+          link_movements (list): list of "connect" or "disconnect" instructions
+            that will result in the new block being added using minimal change
+            of links
+
+    """
     # update switch set
     if level == "spine":
       self.switch_set.num_spine += 1
@@ -51,12 +71,12 @@ class MinimalRewiringILP(object):
     old_wiring[:self.current_wiring.shape[0],:self.current_wiring.shape[1]] = self.current_wiring
     
     # identify link movements
-    lm = self.link_moves(old_wiring.astype(np.int), new_wiring.astype(np.int))
+    link_movements = self.link_moves(old_wiring.astype(np.int), new_wiring.astype(np.int))
 
     # update wiring 
     self.current_wiring = new_wiring.astype(np.int)
 
-    return lm
+    return link_movements
 
   def prepare_variables(self): 
     self.variables = cp.Variable(self.nsp*self.nsv*2, integer=True)
@@ -120,7 +140,7 @@ class MinimalRewiringILP(object):
 
   def link_moves(self, current_wiring, final_wiring):
     capacity = self.switch_set.spine_numports
-    changes = self.ConnectDisconnect(current_wiring, final_wiring)
+    changes = self.connect_disconnect(current_wiring, final_wiring)
     rewires = []
     while len(changes) > 0:
         actions, changes_p, new_capacity = self.swap(changes, capacity)
@@ -129,7 +149,7 @@ class MinimalRewiringILP(object):
         capacity = new_capacity
     return rewires
 
-  def ConnectDisconnect(self, initial, final):
+  def connect_disconnect(self, initial, final):
     disconnect = []
     connect = []
     log = []
