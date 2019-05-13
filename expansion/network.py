@@ -1,17 +1,18 @@
 import numpy as np
 import networkx as nx 
 from collections import defaultdict
-import json 
+import json, sys 
 
 class Switch(object):
   def __init__(self, nid, nports, stype, num):
-    self.nid = nid        # switch id
-    self.stype = stype    # type: host, edge, agg or core
-    self.num = num        # id within type
-    self.nports = nports  # number of ports
-    self.nlinks = 0       # number of links total
-    self.uplinks = 0      # number of uplinks
-    self.links = {}       # links: nid -> [port# ]
+    self.nid = nid                        # switch id
+    self.stype = stype                    # type: host, edge, agg or core
+    self.num = num                        # id within type
+    self.nports = nports                  # number of ports
+    self.nlinks = 0                       # number of links total
+    self.uplinks = 0                      # number of uplinks
+    self.links = defaultdict(list)        # links: nid -> [port# ]
+    self.eports = list(range(1,nports+1)) # empty ports
 
   def __str__(self):
     string = "Switch {}, of type '{}', with {} ports\n"\
@@ -37,7 +38,7 @@ class Network(object):
 
   def add_switch(self, sid, nports, stype):
     self.max_sid = max(self.max_sid, sid)
-    self.switches[nid] = Switch(sid, nports, stype, self.counts[stype])
+    self.switches[sid] = Switch(sid, nports, stype, self.counts[stype])
     self.counts[stype] += 1
 
   def add_link(self, nid1, nid2, count):
@@ -50,10 +51,13 @@ class Network(object):
       self.switches[nid2].nlinks+ count > self.switches[nid2].nports:
       raise Exception('Not enough ports for edge.')
 
-    nport1 = self.switches[nid1].nlinks+1
-    self.switches[nid1].links[nid2] =  [nport1+i for i in range(count)]
-    nport2 = self.switches[nid2].nlinks+1
-    self.switches[nid2].links[nid1] =  [nport2+i for i in range(count)]
+    eports1 = self.switches[nid1].eports
+    self.switches[nid1].links[nid2] =  [eports1[i] for i in range(count)]
+    self.switches[nid1].eports = eports1[count:]
+
+    eports2 = self.switches[nid2].eports
+    self.switches[nid2].links[nid1] =  [eports2[i] for i in range(count)]
+    self.switches[nid2].eports = eports2[count:]
 
     self.switches[nid1].nlinks += count 
     self.switches[nid2].nlinks += count 
@@ -66,14 +70,16 @@ class Network(object):
     self.edges[(nid1, nid2)] += count
 
   def remove_link(self, nid1, nid2, count):
-    """ Remove /count/ links between switches /nid1/ and /nid2/"""
-
+    """ Remove /count/ links between switches /nid1/ and /nid2/""" 
     if nid1 not in self.switches.keys() or nid2 not in self.switches.keys():
-      raise KeyError('Trying to insert edge at unrecognized node.')
+      raise KeyError('Trying to remove edge at unrecognized node.')
 
     if len(self.switches[nid1].links[nid2]) - count < 0:
       raise Exception('Not enough links to remove between nodes.')
  
+    self.switches[nid1].eports += self.switches[nid1].links[nid2][-count:] 
+    self.switches[nid2].eports += self.switches[nid2].links[nid1][-count:] 
+
     self.switches[nid1].links[nid2] = self.switches[nid1].links[nid2][:-count] 
     self.switches[nid2].links[nid1] = self.switches[nid2].links[nid1][:-count] 
 
@@ -176,18 +182,17 @@ class Network(object):
       G.edges[edge]["count"] = self.edges[edge]
     return G
 
-  def graph_traffic_matrix(self, matrix):
-    pass
-
   def core_agg_wiring(self):
     """ Generate wiring matrix between core and agg levels """
     core_key = {sid:i for i, sid in enumerate(self.get_type('core'))}
     agg_key = {sid:i for i, sid in enumerate(self.get_type('agg'))}
-    wiring = np.zeros((len(core_key), len(agg_key)))
+    wiring = np.zeros((len(agg_key), len(core_key)))
     for c_id in core_key.keys():
       for a_id in self.switches[c_id].links.keys():
-        wiring[core_key[c_id],agg_key[a_id]] = len(self.switches[c_id].links[a_id])
-    return wiring, core_key.update(agg_key)
+        wiring[agg_key[a_id], core_key[c_id]] = len(self.switches[c_id].links[a_id])
+    agg_key = {agg_key[k]: k for k in agg_key.keys()}
+    core_key = {core_key[k]: k for k in core_key.keys()}
+    return wiring, agg_key, core_key
 
   def write_graph(self):
     """ Write json graph for visualization purposes """

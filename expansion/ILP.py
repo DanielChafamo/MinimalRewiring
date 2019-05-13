@@ -1,6 +1,6 @@
 import numpy as np
 import cvxpy as cp
-
+import sys
 
 
 class SwitchSet(object):
@@ -64,19 +64,25 @@ class MinimalRewiringILP(object):
 
     # run ILP
     problem = cp.Problem(cp.Minimize(self.objective), self.constraints)
-    problem.solve()
+    solution = problem.solve()
+
+    if solution is None:
+      raise Exception("No rewiring found under given parameters.")
     
     new_wiring = self.variables.value[:self.nsp*self.nsv].reshape(self.nsv, self.nsp)
     old_wiring = np.zeros([self.nsv, self.nsp])
     old_wiring[:self.current_wiring.shape[0],:self.current_wiring.shape[1]] = self.current_wiring
     
+    new_wiring = np.round(new_wiring)
+    old_wiring = np.round(old_wiring)
+
     # identify link movements
-    link_movements = self.link_moves(old_wiring.astype(np.int), new_wiring.astype(np.int))
+    lm = self.link_moves(old_wiring.astype(np.int), new_wiring.astype(np.int))
 
     # update wiring 
     self.current_wiring = new_wiring.astype(np.int)
 
-    return link_movements
+    return lm
 
   def prepare_variables(self): 
     self.variables = cp.Variable(self.nsp*self.nsv*2, integer=True)
@@ -86,7 +92,7 @@ class MinimalRewiringILP(object):
     if _type == "x":
       return i*self.nsp + j 
     else:
-      return self.nsp*self.nsv + i*self.nsv + j
+      return self.nsp*self.nsv + i*self.nsp + j
 
   def curr_wiring(self, i, j):
     if i >= self.current_wiring.shape[0] or j >= self.current_wiring.shape[1]:
